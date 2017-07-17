@@ -1,7 +1,7 @@
 # metabase-client-sample
 Contains sample code needed to pull articles from LexisNexis Metabase
 
-## What is the Metabase Client Sample
+## What is the Metabase Client Sample?
 
 The purpose of this project is to show you how to work with the Metabase API. Each call to the Metabase API will return a download of the latest articles available in either a JSON feed or an XML feed.
 
