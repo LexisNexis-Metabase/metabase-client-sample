@@ -12,6 +12,7 @@
 # September 13, 2016
 #
 
+require 'pry'
 require 'optparse'
 require 'net/http'
 require 'uri'
@@ -43,6 +44,7 @@ class MetabaseApiTutorial
   MB_ACCESS_ID_PARAM_NAME = "key"
   MB_SEQ_ID_PARAM_NAME = "sequence_id"
   MB_LIMIT_PARAM_NAME = "limit"
+  MB_COMPACT = "compact"
 
 =begin
   You should schedule calls frequently enough to ensure you keep up with the daily volume of
@@ -89,7 +91,7 @@ class MetabaseApiTutorial
   SUCCESS = "SUCCESS"
   FAILURE = "FAILURE"
 
-  attr_accessor :key, :hostName, :sequenceId, :pauseMillis, :limit
+  attr_accessor :key, :hostName, :sequenceId, :pauseMillis, :limit, :withContent, :withContentWithMarkup, :withLanguageCode, :compactResponse
 
   def set_fields_from_arguments
 
@@ -113,11 +115,30 @@ class MetabaseApiTutorial
         options[:sequenceId] = sequenceId
       end
 
+      options[:withContent] = nil
+      opts.on('-c', '--with-content', 'provide if you want to show article content') do |withContent|
+        options[:withContent] = true
+      end
+
+      options[:withContentWithMarkup] = nil
+      opts.on('-m', '--with-content-with-markup', 'provide if you want to show article contentWithMarkup') do |withContentWithMarkup|
+        options[:withContentWithMarkup] = true
+      end
+
+      options[:withLanguageCode] = nil
+      opts.on('-l', '--with-language-code', 'provide if you want to show article languageCode') do |withLanguageCode|
+        options[:withLanguageCode] = true
+      end
+
+      options[:compact] = nil
+      opts.on('--compact', 'provide if you want to get compact response') do |compact|
+        options[:compact] = true
+      end
+
       options[:pauseMillis] = nil
       opts.on('-p', '--pauseMillis pauseMillis', 'provide the baseUrl for the MB API') do |pauseMillis|
         options[:pauseMillis] = pauseMillis
       end
-
 
       options[:limit] = nil
       opts.on('-d', '--limit limit', 'provide the baseUrl for the MB API') do |limit|
@@ -155,6 +176,11 @@ class MetabaseApiTutorial
     else
       self.limit=nil
     end
+
+    self.withContent = options[:withContent]
+    self.withContentWithMarkup = options[:withContentWithMarkup]
+    self.withLanguageCode = options[:withLanguageCode]
+    self.compactResponse = options[:compact]
   end
 
 =begin
@@ -170,9 +196,9 @@ class MetabaseApiTutorial
     uri = URI.parse(request_url)
     http = Net::HTTP.new(uri.host, uri.port)
     req = Net::HTTP::Get.new(uri.request_uri)
-    print("Accept-Encoding=gzip")
+    print("Accept-Encoding=gzip\n")
     req["Accept-Encoding"] ="gzip"
-    print("User-Agent=gzip")
+    print("User-Agent=gzip\n")
     req["User-Agent"] ="gzip"
     print("Performing HTTP GET request for (#{request_url})\n")
     res = http.request(req)
@@ -224,7 +250,7 @@ class MetabaseApiTutorial
 
     nil
   end
-  
+
   # This prints the articles from the InputStream received from the Metabase API call
   def print_articles(articlesDoc)
     articlesDoc.root.elements.to_a("/response/articles/article").each do |article|
@@ -232,22 +258,42 @@ class MetabaseApiTutorial
     end
     nil
   end
-  
+
   # This prints a single article, with the data coming from the passed document
   def print_article(articleElement)
     print "**********\n"
-    print "TITLE: ", articleElement.elements["title"].text.strip, "\n"
-    print "URL: ", articleElement.elements["url"].text.strip, "\n"
-    print "SEQUENCE ID: ", articleElement.elements["sequenceId"].text.strip, "\n"
-    print "LICENSES:\n"
-    articleElement.elements["licenses/license/name"].each() {
-      |license|
-      print "\t", license, "\n"
-    }
-    
+    print_article_text_prop("title", articleElement)
+    print_article_text_prop("content", articleElement) if self.withContent
+    print_article_text_prop("contentWithMarkup", articleElement) if self.withContentWithMarkup
+    print_article_text_prop("url", articleElement)
+    print_article_text_prop("sequenceId", articleElement)
+    print_article_text_prop("languageCode", articleElement) if self.withLanguageCode
+    print_article_array_prop("licenses", "licenses/license/name", articleElement)
     nil
   end
-  
+
+  def print_article_text_prop(propertyName, articleElement)
+    propertyValue = articleElement.elements[propertyName]
+    print "#{snakecase(propertyName).upcase}: "
+    if propertyValue.nil? || propertyValue.text.nil?
+      print "(null)", "\n"
+    else
+      print articleElement.elements[propertyName].text.strip, "\n"
+    end
+  end
+
+  def print_article_array_prop(label, propertyName, articleElement)
+    print "#{snakecase(label).upcase}:\n"
+    if articleElement.elements[propertyName]
+      articleElement.elements[propertyName].each do |elem|
+        print "\t", elem, "\n"
+      end
+    else
+      print "\t(no #{label} available)\n"
+    end
+  end
+
+
   # Certain licensed articles require them to be "clicked" to record royalty payments
   # in compliance with LexisNexis rules. This method may be used to call this click url.
   def call_metabase_article(url)
@@ -322,6 +368,10 @@ class MetabaseApiTutorial
       end
     end
 
+    if self.compactResponse
+      request += "&#{MB_COMPACT}=true"
+    end
+
     request
   end
 
@@ -332,6 +382,16 @@ class MetabaseApiTutorial
     sleep(pause_seconds)
     puts '------------------------------------------------------------'
   end
+
+  # make camelCase to snake_case
+  def snakecase(s)
+    s.gsub(/::/, '/').
+      gsub(/([A-Z]+)([A-Z][a-z])/,'\1_\2').
+      gsub(/([a-z\d])([A-Z])/,'\1_\2').
+      tr("-", "_").
+      downcase
+  end
+
 end
 
 
@@ -356,7 +416,7 @@ def main
     # (this will avoid getting duplicates)
 
     next_sequence_id = tutorial.call_metabase_api()
-    
+
     STDOUT.flush
 
     # set the sequenceId with the next sequenceId received from the InputStream
